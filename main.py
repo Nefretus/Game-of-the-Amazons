@@ -1,5 +1,6 @@
 from enum import Enum
 import numpy as np
+import os
 
 
 class BoardSize(Enum):
@@ -16,13 +17,13 @@ class Square(Enum):
 
 
 class Territory(Enum):
-    WHITE = 0  # this territory belongs to black
-    BLACK = 1  # this territory belongs to white
-    NEUTRAL = 2  # shared territory
+    WHITE = 0      # this territory belongs to black
+    BLACK = 1      # this territory belongs to white
+    NEUTRAL = 2    # shared territory
     DEADSPACE = 3  # this territory is closed and cannot be entered by any amazon
-    OCCUPIED = 4  # this square is blocked or has amazon on it
-    ANALYZED = 5  # this state is only active while searching for connected areas
-    UNKNOWN = 6  # square not yet analyzed
+    OCCUPIED = 4   # this square is blocked or has amazon on it
+    ANALYZED = 5   # this state is only active while searching for connected areas
+    UNKNOWN = 6    # square not yet analyzed
 
 
 class Game:
@@ -30,6 +31,7 @@ class Game:
         self.board = Board(board_size)
 
     def run(self):
+        # human vs human
         pass
 
 
@@ -148,8 +150,7 @@ class Board:
                     next_row, next_col = (row + i, col + j)
                     if next_row < 0 or next_row >= size or next_col < 0 or next_col >= size:
                         continue
-                    if self.config[next_row][next_col] == Square.EMPTY and territory_map[next_row][
-                        next_col] == Territory.UNKNOWN:
+                    if self.config[next_row][next_col] == Square.EMPTY and territory_map[next_row][next_col] == Territory.UNKNOWN:
                         territory_map[next_row][next_col] = Territory.ANALYZED
                         queue.append((next_col, next_col))
                     elif self.config[next_row][next_col] != Square.EMPTY:
@@ -197,26 +198,42 @@ if __name__ == '__main__':
     WHITE = (255, 255, 255)
     BLACK = (0, 0, 0)
 
-
     def draw_board(screen):
         for row in range(ROWS):
             for col in range(COLS):
                 color = WHITE if (row + col) % 2 == 0 else BLACK
                 pygame.draw.rect(screen, color, (col * SQUARE_SIZE, row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE))
 
+    def get_piece_coords():
+        white_queen_idx = 1
+        black_queen_idx = 7
+        cols = 6
+        rows = 2
+        rect = spritesheet.get_rect()
+        w = rect.width // cols
+        h = rect.height // rows
+        coords = {
+            Square.WHITE: (white_queen_idx % cols * w, white_queen_idx // cols * h, w, h),
+            Square.BLACK: (black_queen_idx % cols * w, black_queen_idx // cols * h, w, h)
+        }
+        return coords
+
+    def draw_pieces(screen):
+        for row in range(ROWS):
+            for col in range(COLS):
+                screen.blit(spritesheet,  (col * SQUARE_SIZE, row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE), get_piece_coords()[Square.WHITE])
 
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Chessboard")
-
+    spritesheet = pygame.image.load(os.path.join('res', 'pieces.png')).convert_alpha()
     running = True
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-
         screen.fill(WHITE)  # Fill the screen with a white background
         draw_board(screen)
-        pygame.display.flip()
-
+        draw_pieces(screen)
+        pygame.display.update()
     pygame.quit()
