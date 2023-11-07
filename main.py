@@ -1,6 +1,7 @@
 from enum import Enum
 import numpy as np
 import os
+import pygame
 
 
 class BoardSize(Enum):
@@ -17,27 +18,156 @@ class Square(Enum):
 
 
 class Territory(Enum):
-    WHITE = 0      # this territory belongs to black
-    BLACK = 1      # this territory belongs to white
-    NEUTRAL = 2    # shared territory
+    WHITE = 0  # this territory belongs to black
+    BLACK = 1  # this territory belongs to white
+    NEUTRAL = 2  # shared territory
     DEADSPACE = 3  # this territory is closed and cannot be entered by any amazon
-    OCCUPIED = 4   # this square is blocked or has amazon on it
-    ANALYZED = 5   # this state is only active while searching for connected areas
-    UNKNOWN = 6    # square not yet analyzed
+    OCCUPIED = 4  # this square is blocked or has amazon on it
+    ANALYZED = 5  # this state is only active while searching for connected areas
+    UNKNOWN = 6  # square not yet analyzed
 
 
 class Game:
-    def __init__(self, board_size):
+    def __init__(self, board_size, human=False):
         self.board = Board(board_size)
+        self.running = True
+
+        self.human = human
+        if self.human: self.init_interface(board_size)
+
+        self.target_square = None
+        self.source_square = None
+        # in case that shooting arrow fails we need to return to starting position
+        self.starting_square = None
+        self.ending_square = None
+
+        self.mouse_button_clicked = False
+        self.first_move_done = False
+
+    def __del__(self):
+        if self.human:
+            pygame.quit()
+
+    def init_interface(self, board_size):
+        pygame.init()
+        self.screen = pygame.display.set_mode((self.board.board_size[0], self.board.board_size[1]))
+        pygame.display.set_caption("Chessboard")
+        self.spritesheet = pygame.image.load(os.path.join('res', 'pieces.png')).convert_alpha()
+
+        # depends on the spritesheet format
+        white_queen_idx = 1
+        black_queen_idx = 7
+        cols = 6
+        rows = 2
+
+        rect = self.spritesheet.get_rect()
+        w = rect.width // cols
+        h = rect.height // rows
+        self.amazon_sprite_coords = {
+            Square.WHITE: (white_queen_idx % cols * w, white_queen_idx // cols * h, w, h),
+            Square.BLACK: (black_queen_idx % cols * w, black_queen_idx // cols * h, w, h)
+        }
+
+    def draw_board(self):
+        WHITE = (255, 255, 255)
+        BLACK = (33, 12, 125)
+        for row in range(self.board.square_count):
+            for col in range(self.board.square_count):
+                color = WHITE if (row + col) % 2 == 0 else BLACK
+                pygame.draw.rect(self.screen, color, (col * self.board.square_width, row * self.board.square_height,
+                                                      self.board.square_width, self.board.square_height))
+
+    def draw_pieces(self):
+        for i in range(self.board.square_count):
+            for j in range(self.board.square_count):
+                queen = self.board.config[i][j]
+                if queen in [Square.WHITE, Square.BLACK]:
+                    sprite = self.spritesheet.subsurface(pygame.Rect(self.amazon_sprite_coords[queen]))
+                    scaled_sprite = pygame.transform.smoothscale(sprite, (self.board.square_width, self.board.square_height))
+                    self.screen.blit(scaled_sprite,
+                                     (j * self.board.square_width, i * self.board.square_height,
+                                      self.board.square_width, self.board.square_height))
+                if queen == Square.BLOCKED:
+                    pygame.draw.rect(self.screen,
+                                     (0, 0, 0),
+                                     (j * self.board.square_width, i * self.board.square_height,
+                                            self.board.square_width, self.board.square_height))
+
+    def update(self):
+        self.move_piece()
+
+    def move_piece(self):
+        # find out which player clicked on
+        if self.mouse_button_clicked:
+            position = pygame.mouse.get_pos()
+            for i in range(self.board.square_count):
+                for j in range(self.board.square_count):
+                    rect = pygame.Rect(j * self.board.square_width, i * self.board.square_height,
+                                       self.board.square_width, self.board.square_height)
+                    if rect.collidepoint(position[0], position[1]):
+                        if not self.first_move_done:
+                            if self.source_square is not None:
+                                self.target_square = (i, j)
+                            else:
+                                self.source_square = (i, j)
+                        else:
+                            #ending square is the on from the first move
+                            self.source_square = self.ending_square
+                            self.target_square = (i, j)
+        # we want to recolor selected square
+        if self.source_square is not None and self.target_square is None and not self.first_move_done:
+            transparent_blue = (28, 21, 212, 170)
+            surface = pygame.Surface((self.board.square_width, self.board.square_height), pygame.SRCALPHA)
+            surface.fill(transparent_blue)
+            self.screen.blit(surface, (
+                        self.source_square[1] * self.board.square_width, self.source_square[0] * self.board.square_height))
+        elif self.target_square is not None:
+            if self.board.is_valid_move(self.source_square, self.target_square):
+                if not self.first_move_done:
+                    self.board.move_amazon(self.source_square, self.target_square)
+                    self.starting_square = self.source_square
+                    self.ending_square = self.target_square
+                    self.first_move_done = True
+                else:
+                    self.board.shoot_arrow(self.target_square)
+                    self.board.white_to_play = not self.board.white_to_play
+                    self.first_move_done = False
+            elif self.first_move_done:
+                #return to the starting square
+                self.board.move_amazon(self.ending_square, self.starting_square)
+                self.first_move_done = False
+            self.target_square = None
+            self.source_square = None
+        self.mouse_button_clicked = False
 
     def run(self):
         # human vs human
-        pass
-
+        clock = pygame.time.Clock()
+        while self.running:
+            clock.tick(60)
+            # get move
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    self.mouse_button_clicked = True
+            # self.screen.fill(WHITE)  # Fill the screen with a white background
+            self.draw_board()
+            self.update()
+            self.draw_pieces()
+            pygame.display.update()
+            # check whether the game ended
+            # draw on the screen
 
 class Board:
     def __init__(self, board_size):
         self.white_to_play = True
+        # if this is false, player shoots the arrow, not moving amazon during his turn
+        self.amazon_move = True
+        self.square_count = board_size.value
+        self.board_size = (480, 480)
+        self.square_width = self.board_size[0] // self.square_count
+        self.square_height = self.board_size[1] // self.square_count
         self.config = self.generate_start_config(board_size)
         self.print_board()
 
@@ -97,7 +227,7 @@ class Board:
         # source square has to be the one containing either black or white amazon
         if (self.white_to_play and self.config[source_row][source_col] != Square.WHITE) or (
                 not self.white_to_play and self.config[source_row][source_col] != Square.BLACK):
-            print('Invalid move, there is no piece on this square')
+            print('Invalid move, there is no piece on this square', source_row, source_col)
             return False
 
         # move can only be straight line
@@ -116,7 +246,8 @@ class Board:
             return False
 
         # get all the indices on the line
-        for i in range(max_abs_delta + 1):
+        # zmienic zeby nie uwzgledniac source i destination
+        for i in range(1, max_abs_delta + 1):
             current_row = source_row + (i * delta_row) // max_abs_delta
             current_col = source_col + (i * delta_col) // max_abs_delta
             if self.config[current_row][current_col] in [Square.BLOCKED, Square.WHITE, Square.BLACK]:
@@ -126,9 +257,9 @@ class Board:
 
     def move_amazon(self, src, dest):
         self.config[dest[0]][dest[1]] = self.config[src[0]][src[1]]
-        self.config[dest[0]][dest[1]] = Square.EMPTY
+        self.config[src[0]][src[1]] = Square.EMPTY
 
-    def shot_arrow(self, dest):
+    def shoot_arrow(self, dest):
         self.config[dest[0]][dest[1]] = Square.BLOCKED
 
     # wyjasnienie algorytmu https://www.baeldung.com/cs/flood-fill-algorithm
@@ -140,6 +271,7 @@ class Board:
                     if territory_map[row][col] == Territory.ANALYZED:
                         territory_map[row][col] = territory
                         count += 1
+
         def search_neighbours(start_row, start_col):
             queue = [(start_row, start_col)]
             encountered_square_states = {}
@@ -150,15 +282,16 @@ class Board:
                     next_row, next_col = (row + i, col + j)
                     if next_row < 0 or next_row >= size or next_col < 0 or next_col >= size:
                         continue
-                    if self.config[next_row][next_col] == Square.EMPTY and territory_map[next_row][next_col] == Territory.UNKNOWN:
+                    if self.config[next_row][next_col] == Square.EMPTY and territory_map[next_row][
+                        next_col] == Territory.UNKNOWN:
                         territory_map[next_row][next_col] = Territory.ANALYZED
                         queue.append((next_col, next_col))
                     elif self.config[next_row][next_col] != Square.EMPTY:
                         encountered_square_states[self.config[next_row][next_col]] = 1
                         territory_map[next_row][next_col] = Territory.OCCUPIED
-            if Square.WHITE in encountered_square_states and not Square.BLACK in encountered_square_states:
+            if Square.WHITE in encountered_square_states and Square.BLACK not in encountered_square_states:
                 return update_territory(Territory.WHITE), 0, 0
-            elif Square.BLACK in encountered_square_states and not Square.WHITE in encountered_square_states:
+            elif Square.BLACK in encountered_square_states and Square.WHITE not in encountered_square_states:
                 return 0, update_territory(Territory.BLACK), 0
             elif Square.WHITE in encountered_square_states and Square.BLACK in encountered_square_states:
                 return 0, 0, update_territory(Territory.NEUTRAL)
@@ -186,54 +319,5 @@ class Board:
             return w_territory + n_territory, b_territory + n_territory
 
 if __name__ == '__main__':
-    Game(BoardSize.TenByTen).run()
-    import pygame
+    Game(BoardSize.SixBySix, human=True).run()
 
-    # Constants
-    WIDTH, HEIGHT = 640, 480
-    ROWS, COLS = 8, 8
-    SQUARE_SIZE = WIDTH // COLS
-
-    # Colors
-    WHITE = (255, 255, 255)
-    BLACK = (0, 0, 0)
-
-    def draw_board(screen):
-        for row in range(ROWS):
-            for col in range(COLS):
-                color = WHITE if (row + col) % 2 == 0 else BLACK
-                pygame.draw.rect(screen, color, (col * SQUARE_SIZE, row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE))
-
-    def get_piece_coords():
-        white_queen_idx = 1
-        black_queen_idx = 7
-        cols = 6
-        rows = 2
-        rect = spritesheet.get_rect()
-        w = rect.width // cols
-        h = rect.height // rows
-        coords = {
-            Square.WHITE: (white_queen_idx % cols * w, white_queen_idx // cols * h, w, h),
-            Square.BLACK: (black_queen_idx % cols * w, black_queen_idx // cols * h, w, h)
-        }
-        return coords
-
-    def draw_pieces(screen):
-        for row in range(ROWS):
-            for col in range(COLS):
-                screen.blit(spritesheet,  (col * SQUARE_SIZE, row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE), get_piece_coords()[Square.WHITE])
-
-    pygame.init()
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("Chessboard")
-    spritesheet = pygame.image.load(os.path.join('res', 'pieces.png')).convert_alpha()
-    running = True
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-        screen.fill(WHITE)  # Fill the screen with a white background
-        draw_board(screen)
-        draw_pieces(screen)
-        pygame.display.update()
-    pygame.quit()
