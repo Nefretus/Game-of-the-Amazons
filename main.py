@@ -95,6 +95,7 @@ class Game:
 
     def update(self):
         self.move_piece()
+        print(self.board.count_territory())
 
     def move_piece(self):
         # find out which player clicked on
@@ -271,6 +272,7 @@ class Board:
                     if territory_map[row][col] == Territory.ANALYZED:
                         territory_map[row][col] = territory
                         count += 1
+            return count
 
         def search_neighbours(start_row, start_col):
             queue = [(start_row, start_col)]
@@ -282,10 +284,9 @@ class Board:
                     next_row, next_col = (row + i, col + j)
                     if next_row < 0 or next_row >= size or next_col < 0 or next_col >= size:
                         continue
-                    if self.config[next_row][next_col] == Square.EMPTY and territory_map[next_row][
-                        next_col] == Territory.UNKNOWN:
+                    if self.config[next_row][next_col] == Square.EMPTY and territory_map[next_row][next_col] == Territory.UNKNOWN:
                         territory_map[next_row][next_col] = Territory.ANALYZED
-                        queue.append((next_col, next_col))
+                        queue.append((next_row, next_col))
                     elif self.config[next_row][next_col] != Square.EMPTY:
                         encountered_square_states[self.config[next_row][next_col]] = 1
                         territory_map[next_row][next_col] = Territory.OCCUPIED
@@ -308,7 +309,7 @@ class Board:
                     w_territory += w
                     b_territory += b
                     n_territory += n
-                elif territory_map[row][col] == Territory.UNKNOWN and self.config[row][col] != Square.EMPTY:
+                elif territory_map[row][col] == Territory.UNKNOWN:
                     territory_map[row][col] = Territory.OCCUPIED
         if n_territory == 0:
             if w_territory > b_territory:
