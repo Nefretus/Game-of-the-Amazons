@@ -1,3 +1,4 @@
+import copy
 from enum import Enum
 import numpy as np
 import os
@@ -9,21 +10,32 @@ class BoardSize(Enum):
     EightByEight = 8
     TenByTen = 10
 
+class Player(Enum):
+    WHITE = 0
+    BLACK = 1
+
+    @classmethod
+    def other(cls, player):
+        if player == cls.WHITE:
+            return Player.BLACK
+        elif player == cls.BLACK:
+            return Player.WHITE
+        else:
+            return player
 
 class Square(Enum):
-    WHITE = 0  # there is white amazon on that square
-    BLACK = 1  # there is black amazon on that square
-    EMPTY = 2  # square is empty
-    BLOCKED = 3  # square blocked
-
+    WHITE = 0      # there is white amazon on that square
+    BLACK = 1      # there is black amazon on that square
+    EMPTY = 2      # square is empty
+    BLOCKED = 3    # square blocked
 
 class Territory(Enum):
-    WHITE = 0  # this territory belongs to black
-    BLACK = 1  # this territory belongs to white
+    WHITE = 0  # territory belongs to black
+    BLACK = 1  # territory belongs to white
     NEUTRAL = 2  # shared territory
-    DEADSPACE = 3  # this territory is closed and cannot be entered by any amazon
-    OCCUPIED = 4  # this square is blocked or has amazon on it
-    ANALYZED = 5  # this state is only active while searching for connected areas
+    DEADSPACE = 3  # territory is closed and cannot be entered by any amazon
+    OCCUPIED = 4  # territory is blocked or has amazon on it
+    ANALYZED = 5  # state is only active while searching for connected areas
     UNKNOWN = 6  # square not yet analyzed
 
 
@@ -33,11 +45,12 @@ class Game:
         self.running = True
 
         self.human = human
-        if self.human: self.init_interface(board_size)
+        if self.human:
+            self.init_interface(board_size)
 
         self.target_square = None
         self.source_square = None
-        # in case that shooting arrow fails we need to return to starting position
+        # in case that shooting arrow fails, we need to return to starting position
         self.starting_square = None
         self.ending_square = None
 
@@ -83,7 +96,8 @@ class Game:
                 queen = self.board.config[i][j]
                 if queen in [Square.WHITE, Square.BLACK]:
                     sprite = self.spritesheet.subsurface(pygame.Rect(self.amazon_sprite_coords[queen]))
-                    scaled_sprite = pygame.transform.smoothscale(sprite, (self.board.square_width, self.board.square_height))
+                    scaled_sprite = pygame.transform.smoothscale(sprite,
+                                                                 (self.board.square_width, self.board.square_height))
                     self.screen.blit(scaled_sprite,
                                      (j * self.board.square_width, i * self.board.square_height,
                                       self.board.square_width, self.board.square_height))
@@ -91,7 +105,7 @@ class Game:
                     pygame.draw.rect(self.screen,
                                      (0, 0, 0),
                                      (j * self.board.square_width, i * self.board.square_height,
-                                            self.board.square_width, self.board.square_height))
+                                      self.board.square_width, self.board.square_height))
 
     def update(self):
         self.move_piece()
@@ -112,7 +126,7 @@ class Game:
                             else:
                                 self.source_square = (i, j)
                         else:
-                            #ending square is the on from the first move
+                            # ending square is the one from the first move
                             self.source_square = self.ending_square
                             self.target_square = (i, j)
         # we want to recolor selected square
@@ -121,7 +135,7 @@ class Game:
             surface = pygame.Surface((self.board.square_width, self.board.square_height), pygame.SRCALPHA)
             surface.fill(transparent_blue)
             self.screen.blit(surface, (
-                        self.source_square[1] * self.board.square_width, self.source_square[0] * self.board.square_height))
+                self.source_square[1] * self.board.square_width, self.source_square[0] * self.board.square_height))
         elif self.target_square is not None:
             if self.board.is_valid_move(self.source_square, self.target_square):
                 if not self.first_move_done:
@@ -134,7 +148,7 @@ class Game:
                     self.board.white_to_play = not self.board.white_to_play
                     self.first_move_done = False
             elif self.first_move_done:
-                #return to the starting square
+                # return to the starting square
                 self.board.move_amazon(self.ending_square, self.starting_square)
                 self.first_move_done = False
             self.target_square = None
@@ -160,6 +174,7 @@ class Game:
             # check whether the game ended
             # draw on the screen
 
+
 class Board:
     def __init__(self, board_size):
         self.white_to_play = True
@@ -170,7 +185,8 @@ class Board:
         self.square_width = self.board_size[0] // self.square_count
         self.square_height = self.board_size[1] // self.square_count
         self.config = self.generate_start_config(board_size)
-        self.print_board()
+
+    # self.print_board()
 
     def generate_start_config(self, board_size):
         config = [[Square.EMPTY for _ in range(board_size.value)] for _ in range(board_size.value)]
@@ -284,7 +300,8 @@ class Board:
                     next_row, next_col = (row + i, col + j)
                     if next_row < 0 or next_row >= size or next_col < 0 or next_col >= size:
                         continue
-                    if self.config[next_row][next_col] == Square.EMPTY and territory_map[next_row][next_col] == Territory.UNKNOWN:
+                    if self.config[next_row][next_col] == Square.EMPTY and territory_map[next_row][
+                        next_col] == Territory.UNKNOWN:
                         territory_map[next_row][next_col] = Territory.ANALYZED
                         queue.append((next_row, next_col))
                     elif self.config[next_row][next_col] != Square.EMPTY:
@@ -299,6 +316,7 @@ class Board:
             else:
                 update_territory(Territory.DEADSPACE)
                 return 0, 0, 0
+
         size = len(self.config)
         territory_map = [[Territory.UNKNOWN for _ in range(size)] for _ in range(size)]
         w_territory = b_territory = n_territory = 0
@@ -319,6 +337,125 @@ class Board:
         else:
             return w_territory + n_territory, b_territory + n_territory
 
-if __name__ == '__main__':
-    Game(BoardSize.SixBySix, human=True).run()
 
+class BoardAI(Board):
+    def __init__(self, board_size):
+        super().__init__(board_size)
+
+    # queenlike moves apply to amazon and arrow moves
+    # input: starting square
+    # output: possible ending squares
+    def get_queenlike_moves(self, start):
+        moves = []
+        for i in range(len(self.config)):
+            for j in range(len(self.config)):
+                target = (i, j)
+                if self.is_valid_move(start, target):
+                    moves.append((start, target))
+        return moves
+
+    # input: player - white or black
+    # output: (start, target, arrow) - all possible positions
+    def get_possible_moves(self, player):
+        output = []
+        for i in range(len(self.config)):
+            for j in range(len(self.config)):
+                if self.config[i][j] == player:
+                    start = (i, j)
+                    for amazon_moves in self.get_queenlike_moves(start):
+                        for amazon_move in amazon_moves:
+                            state = self.get_new_state_for_amazon_move(amazon_move)
+                            amazon_target = amazon_moves[1]
+                            for _, arrow_target in state.get_queenlike_moves(amazon_target):
+                                output.append((start, amazon_target, arrow_target))
+        return output
+
+    # takes the amazon move and returns new board after this move is applied
+    def get_new_state_for_amazon_move(self, amazon_move):
+        board = copy.copy(self)
+        board.move_amazon(*amazon_move)
+        return board
+
+    # takes the arrow move and returns new board after this move is applied
+    def get_new_state_for_arrow_move(self, move):
+        board = copy.copy(self)
+        board.shoot_arrow(*move)
+        return board
+
+    # takes the full in the form of (start, end, arrow) and returns new board after this move is applied
+    def get_new_state_for_full_move(self, move):
+        board = copy.copy(self)
+        amazon_start, amazon_target, arrow = move
+        board.move_amazon(amazon_start, amazon_target)
+        board.shoot_arrow(arrow)
+        return board
+
+
+import datetime
+import random
+from math import log, sqrt
+
+
+class MonteCarloTreeSearch:
+    def __init__(self, seconds=30):
+        self.starting_board = BoardAI(BoardSize.SixBySix)
+        self.states = dict()
+
+        # true - white player, false - player black
+        # update the path during back propagation
+        self.path = {
+            Player.WHITE: [],
+            Player.BLACK: []
+        }
+        self.player = Player.WHITE
+
+        self.calculation_time = datetime.timedelta(seconds=seconds)
+        begin = datetime.datetime.utcnow()
+        while datetime.datetime.utcnow() - begin < self.calculation_time:
+            self.simluate()
+
+    def select_and_expand(self, init_state, player):
+        max_score = None
+        best_state = None
+        moves = init_state.get_possible_moves(player)
+        random.shuffle(moves)
+        for move in moves:
+            state = init_state.get_new_state_for_full_move(move)
+            # we found unexplored node, expand on it
+            if state not in self.states:
+                self.path[player].append(state)
+                return state, Player.other(player)
+            wins, plays = self.states[state]
+            if max_score is None or wins / plays > max_score:
+                max_score = (wins / plays) + (1.4 * sqrt(log(plays) / plays))
+                best_state = state
+        self.path[player].append(best_state)
+        # all the moves for one player are evaluated, search for the other one
+        return self.select_and_expand(best_state, Player.other(player))
+
+    def backpropagation(self, player, winner):
+        for state in self.path[player]:
+            if state in self.states:
+                wins, plays = self.states[state]
+                if winner:
+                    wins += 1
+                plays += 1
+                self.states[state] = (wins, plays)
+
+    def simluate(self):
+        state, self.player = self.select_and_expand(self.starting_board, self.player)
+        # play one game until the end
+        while True:
+            moves = state.get_possible_moves(self.player)
+            if not moves:
+                break
+            state = state.get_new_state_for_full_move(random.choice(moves))
+            self.path[self.player].append(state)
+            self.player = Player.other(self.player)
+        self.backpropagation(Player.other(self.player), True)
+        self.backpropagation(self.player, False)
+
+
+if __name__ == '__main__':
+    print(Square.WHITE == Player.WHITE)
+    Game(BoardSize.SixBySix, human=True).run()
