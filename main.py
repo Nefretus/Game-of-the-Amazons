@@ -360,7 +360,7 @@ class BoardAI(Board):
         output = []
         for i in range(len(self.config)):
             for j in range(len(self.config)):
-                if self.config[i][j] == player:
+                if self.config[i][j] == player: #buuuuuuuuuuuuuug
                     start = (i, j)
                     for amazon_moves in self.get_queenlike_moves(start):
                         for amazon_move in amazon_moves:
@@ -399,6 +399,13 @@ from math import log, sqrt
 class MonteCarloTreeSearch:
     def __init__(self, seconds=30):
         self.starting_board = BoardAI(BoardSize.SixBySix)
+
+        # Larger values of C will encourage more exploration of the possibilities,
+        # and smaller values will cause the AI to prefer concentrating on known good moves
+        self.C = 1.4
+
+        # idx 0 - wins
+        # idx 1 - plays
         self.states = dict()
 
         # true - white player, false - player black
@@ -415,15 +422,34 @@ class MonteCarloTreeSearch:
             self.simluate()
 
     def select_and_expand(self, init_state, player):
+
+        # if we looked up all moves from this position, just pick the best one and go next
+        next_states = [
+            state
+            for move in init_state.get_possible_moves()
+            for state in init_state.get_new_state_for_full_move(move)
+        ]
+
+        if all(self.states.get(state) for state in next_states):
+            log_total = log(sum(self.states[state][1] for state in next_states))
+            value, state = max(
+                ((self.states[state][0] / self.states[state][1]) + self.C * sqrt(log_total / self.states[state][1]), state) for state in next_states
+            )
+        else:
+            #move, state = choice(moves_states)
+            pass
+
         max_score = None
         best_state = None
         moves = init_state.get_possible_moves(player)
         random.shuffle(moves)
+
         for move in moves:
             state = init_state.get_new_state_for_full_move(move)
             # we found unexplored node, expand on it
             if state not in self.states:
                 self.path[player].append(state)
+                self.states[state] = (0, 0)
                 return state, Player.other(player)
             wins, plays = self.states[state]
             if max_score is None or wins / plays > max_score:
