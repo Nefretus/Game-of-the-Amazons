@@ -10,6 +10,7 @@ class BoardSize(Enum):
     EightByEight = 8
     TenByTen = 10
 
+
 class Player(Enum):
     WHITE = 0
     BLACK = 1
@@ -23,11 +24,13 @@ class Player(Enum):
         else:
             return player
 
+
 class Square(Enum):
-    WHITE = 0      # there is white amazon on that square
-    BLACK = 1      # there is black amazon on that square
-    EMPTY = 2      # square is empty
-    BLOCKED = 3    # square blocked
+    WHITE = 0  # there is white amazon on that square
+    BLACK = 1  # there is black amazon on that square
+    EMPTY = 2  # square is empty
+    BLOCKED = 3  # square blocked
+
 
 class Territory(Enum):
     WHITE = 0  # territory belongs to black
@@ -237,15 +240,17 @@ class Board:
         print("     White")
 
     # takes in move as two tuples containing indices in config list
-    def is_valid_move(self, source, destination):
+    def is_valid_move(self, source, destination, omit_player_checking=False):
         source_row, source_col = source
         dest_row, dest_col = destination
 
         # source square has to be the one containing either black or white amazon
-        if (self.white_to_play and self.config[source_row][source_col] != Square.WHITE) or (
-                not self.white_to_play and self.config[source_row][source_col] != Square.BLACK):
-            print('Invalid move, there is no piece on this square', source_row, source_col)
-            return False
+        # AI algorithm doesn't rely on internal white_to_play variable, so there is option to turn it off
+        if not omit_player_checking:
+            if (self.white_to_play and self.config[source_row][source_col] != Square.WHITE) or (
+                    not self.white_to_play and self.config[source_row][source_col] != Square.BLACK):
+                #   print('Invalid move, there is no piece on this square', source_row, source_col)
+                return False
 
         # move can only be straight line
         delta_row = dest_row - source_row
@@ -254,12 +259,12 @@ class Board:
 
         # tanges 45 = 1 = x / y, zeby diagolnie lezaly na tej samej prostej kat musi być miedzy nimi 45 stopni
         if delta_row != 0 and delta_col != 0 and abs(delta_row / delta_col) != 1:
-            print('Invalid move, targets are not on the straight line')
+            # print('Invalid move, targets are not on the straight line')
             return False
 
         # for vertical and horizontal
         if delta_row == 0 and delta_col == 0:
-            print('Invalid move, cannot move to the same square')
+            #  print('Invalid move, cannot move to the same square')
             return False
 
         # get all the indices on the line
@@ -268,7 +273,7 @@ class Board:
             current_row = source_row + (i * delta_row) // max_abs_delta
             current_col = source_col + (i * delta_col) // max_abs_delta
             if self.config[current_row][current_col] in [Square.BLOCKED, Square.WHITE, Square.BLACK]:
-                print('Invalid move, you cannot cross or enter occupied square')
+                # print('Invalid move, you cannot cross or enter occupied square')
                 return False
         return True
 
@@ -350,7 +355,7 @@ class BoardAI(Board):
         for i in range(len(self.config)):
             for j in range(len(self.config)):
                 target = (i, j)
-                if self.is_valid_move(start, target):
+                if self.is_valid_move(start, target, omit_player_checking=True):
                     moves.append((start, target))
         return moves
 
@@ -358,40 +363,53 @@ class BoardAI(Board):
     # output: (start, target, arrow) - all possible positions
     def get_possible_moves(self, player):
         output = []
+        if player == Player.WHITE:
+            color = Square.WHITE
+        else:
+            color = Square.BLACK
         for i in range(len(self.config)):
             for j in range(len(self.config)):
-                if self.config[i][j] == player: #buuuuuuuuuuuuuug
+                if self.config[i][j] == color:
                     start = (i, j)
-                    for amazon_moves in self.get_queenlike_moves(start):
-                        for amazon_move in amazon_moves:
-                            state = self.get_new_state_for_amazon_move(amazon_move)
-                            amazon_target = amazon_moves[1]
-                            for _, arrow_target in state.get_queenlike_moves(amazon_target):
-                                output.append((start, amazon_target, arrow_target))
+                    for _, amazon_target in self.get_queenlike_moves(start):
+                        state = self.get_new_state_for_amazon_move(start, amazon_target)
+                        for _, arrow_target in state.get_queenlike_moves(amazon_target):
+                            output.append((start, amazon_target, arrow_target))
         return output
 
     # takes the amazon move and returns new board after this move is applied
-    def get_new_state_for_amazon_move(self, amazon_move):
-        board = copy.copy(self)
-        board.move_amazon(*amazon_move)
+    def get_new_state_for_amazon_move(self, amazon_start, amazon_target):
+        board = copy.deepcopy(self)
+        board.move_amazon(amazon_start, amazon_target)
         return board
 
     # takes the arrow move and returns new board after this move is applied
     def get_new_state_for_arrow_move(self, move):
-        board = copy.copy(self)
-        board.shoot_arrow(*move)
+        board = copy.deepcopy(self)
+        board.shoot_arrow(move)
         return board
 
     # takes the full in the form of (start, end, arrow) and returns new board after this move is applied
     def get_new_state_for_full_move(self, move):
-        board = copy.copy(self)
+        board = copy.deepcopy(self)
         amazon_start, amazon_target, arrow = move
         board.move_amazon(amazon_start, amazon_target)
         board.shoot_arrow(arrow)
         return board
 
+    # this is needed for comparing states
+    def __eq__(self, other):
+        for i in range(len(self.config)):
+            for j in range(len(self.config)):
+                if self.config[i][j] != other.config[i][j]:
+                    return False
+        return True
 
-import datetime
+    def __hash__(self):
+        return hash(str(self.config))
+
+
+from datetime import datetime, timedelta
 import random
 from math import log, sqrt
 
@@ -416,47 +434,57 @@ class MonteCarloTreeSearch:
         }
         self.player = Player.WHITE
 
-        self.calculation_time = datetime.timedelta(seconds=seconds)
-        begin = datetime.datetime.utcnow()
-        while datetime.datetime.utcnow() - begin < self.calculation_time:
-            self.simluate()
+        self.calculation_time = timedelta(seconds=seconds)
+        begin = datetime.now()
+        while datetime.now() - begin < self.calculation_time:
+            self.path[Player.WHITE].clear()
+            self.path[Player.BLACK].clear()
+            self.simulate()
+        print('siema')
+
+    # def select_and_expand(self, init_state, player):
+    #     max_score = None
+    #     best_state = None
+    #     moves = init_state.get_possible_moves(player)
+    #     random.shuffle(moves)
+    #     #print(len(self.path[player]))
+    #     for move in moves:
+    #         state = init_state.get_new_state_for_full_move(move)
+    #         # we found unexplored node, expand on it
+    #         if state not in self.states:
+    #             self.path[player].append(state)
+    #             self.states[state] = (0, 0)
+    #             return state, Player.other(player)
+    #         wins, plays = self.states[state]
+    #         if max_score is None or wins / plays > max_score:
+    #             max_score = (wins / plays) + (1.4 * sqrt(log(plays) / plays))
+    #             best_state = state
+    #     self.path[player].append(best_state)
+    #     # all the moves for one player are evaluated, search for the other one
+    #     return self.select_and_expand(best_state, Player.other(player))
 
     def select_and_expand(self, init_state, player):
-
-        # if we looked up all moves from this position, just pick the best one and go next
+        best_state = None
         next_states = [
-            state
-            for move in init_state.get_possible_moves()
-            for state in init_state.get_new_state_for_full_move(move)
+            init_state.get_new_state_for_full_move(move)
+            for move in init_state.get_possible_moves(player)
         ]
-
         if all(self.states.get(state) for state in next_states):
             log_total = log(sum(self.states[state][1] for state in next_states))
-            value, state = max(
-                ((self.states[state][0] / self.states[state][1]) + self.C * sqrt(log_total / self.states[state][1]), state) for state in next_states
+            value, best_state = max(
+                ((self.states[state][0] / self.states[state][1]) +
+                 self.C * sqrt(log_total / self.states[state][1]),
+                 state)
+                for state in next_states
             )
         else:
-            #move, state = choice(moves_states)
-            pass
-
-        max_score = None
-        best_state = None
-        moves = init_state.get_possible_moves(player)
-        random.shuffle(moves)
-
-        for move in moves:
-            state = init_state.get_new_state_for_full_move(move)
+            best_state = random.choice(next_states)
             # we found unexplored node, expand on it
-            if state not in self.states:
-                self.path[player].append(state)
-                self.states[state] = (0, 0)
-                return state, Player.other(player)
-            wins, plays = self.states[state]
-            if max_score is None or wins / plays > max_score:
-                max_score = (wins / plays) + (1.4 * sqrt(log(plays) / plays))
-                best_state = state
+            if best_state not in self.states:
+                self.path[player].append(best_state)
+                self.states[best_state] = (0, 0)
+                return best_state, Player.other(player)
         self.path[player].append(best_state)
-        # all the moves for one player are evaluated, search for the other one
         return self.select_and_expand(best_state, Player.other(player))
 
     def backpropagation(self, player, winner):
@@ -468,7 +496,7 @@ class MonteCarloTreeSearch:
                 plays += 1
                 self.states[state] = (wins, plays)
 
-    def simluate(self):
+    def simulate(self):
         state, self.player = self.select_and_expand(self.starting_board, self.player)
         # play one game until the end
         while True:
@@ -484,4 +512,7 @@ class MonteCarloTreeSearch:
 
 if __name__ == '__main__':
     print(Square.WHITE == Player.WHITE)
-    Game(BoardSize.SixBySix, human=True).run()
+    MonteCarloTreeSearch(seconds=155)
+    # Game(BoardSize.SixBySix, human=True).run()
+
+# Cel na rano: zapis do pliku
