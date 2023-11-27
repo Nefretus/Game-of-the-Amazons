@@ -1,11 +1,10 @@
 import copy
 from enum import Enum
-import numpy as np
 import os
-import pygame
 
 
 class BoardSize(Enum):
+    FourByFour = 4
     SixBySix = 6
     EightByEight = 8
     TenByTen = 10
@@ -45,7 +44,10 @@ class Territory(Enum):
 class Game:
     def __init__(self, board_size, human=False):
         self.board = Board(board_size)
+
+        # exiting flags
         self.running = True
+        self.exit = False
 
         self.human = human
         if self.human:
@@ -62,6 +64,11 @@ class Game:
 
     def __del__(self):
         if self.human:
+            # game has ended, wait for the user to close the game
+            while not self.exit:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        self.exit = True
             pygame.quit()
 
     def init_interface(self, board_size):
@@ -96,26 +103,38 @@ class Game:
     def draw_pieces(self):
         for i in range(self.board.square_count):
             for j in range(self.board.square_count):
-                queen = self.board.config[i][j]
-                if queen in [Square.WHITE, Square.BLACK]:
-                    sprite = self.spritesheet.subsurface(pygame.Rect(self.amazon_sprite_coords[queen]))
+                amazon = self.board.config[i][j]
+                if amazon in [Square.WHITE, Square.BLACK]:
+                    sprite = self.spritesheet.subsurface(pygame.Rect(self.amazon_sprite_coords[amazon]))
                     scaled_sprite = pygame.transform.smoothscale(sprite,
                                                                  (self.board.square_width, self.board.square_height))
                     self.screen.blit(scaled_sprite,
                                      (j * self.board.square_width, i * self.board.square_height,
                                       self.board.square_width, self.board.square_height))
-                if queen == Square.BLOCKED:
+                if amazon == Square.BLOCKED:
                     pygame.draw.rect(self.screen,
                                      (0, 0, 0),
                                      (j * self.board.square_width, i * self.board.square_height,
                                       self.board.square_width, self.board.square_height))
 
     def update(self):
-        self.move_piece()
-        print(self.board.count_territory())
+        # for now, human will play as white and bot as black
+        if self.board.white_to_play:
+            new_board = bot_decide(self.board, Player.WHITE)
+            self.board.update_config(new_board.config)
+            self.board.white_to_play = False
+        else:
+            self.move_piece_human()
+        w_terr, b_terr = self.board.count_territory()
+        if w_terr == -1:
+            print('Black won!')
+            self.running = False
+        if b_terr == -1:
+            print('White won!')
+            self.running = False
+       # print('Territory (White, Black):', self.board.count_territory())
 
-    def move_piece(self):
-        # find out which player clicked on
+    def move_piece_human(self):
         if self.mouse_button_clicked:
             position = pygame.mouse.get_pos()
             for i in range(self.board.square_count):
@@ -159,42 +178,51 @@ class Game:
         self.mouse_button_clicked = False
 
     def run(self):
-        # human vs human
         clock = pygame.time.Clock()
-        while self.running:
-            clock.tick(60)
-            # get move
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.running = False
-                if event.type == pygame.MOUSEBUTTONDOWN:
-                    self.mouse_button_clicked = True
-            # self.screen.fill(WHITE)  # Fill the screen with a white background
-            self.draw_board()
-            self.update()
-            self.draw_pieces()
-            pygame.display.update()
-            # check whether the game ended
-            # draw on the screen
+        while not self.exit:
+            while self.running:
+                clock.tick(60)
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        # additional flag to wait after the game ended, dirty i know...
+                        self.exit = True
+                        self.running = False
+                    if event.type == pygame.MOUSEBUTTONDOWN:
+                        self.mouse_button_clicked = True
+                self.draw_board()
+                self.update()
+                self.draw_pieces()
+                pygame.display.update()
+            #reset board
+            self.reset()
 
+    def reset(self):
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.MOUSEBUTTONDOWN or event.type == pygame.KEYDOWN:
+                    self.board = Board(BoardSize.FourByFour)
+                    self.running = True
+                    return
+                if event.type == pygame.QUIT:
+                    self.exit = True
+                    return
 
 class Board:
     def __init__(self, board_size):
         self.white_to_play = True
-        # if this is false, player shoots the arrow, not moving amazon during his turn
-        self.amazon_move = True
         self.square_count = board_size.value
-        self.board_size = (480, 480)
+        self.board_size = (360, 360)
         self.square_width = self.board_size[0] // self.square_count
         self.square_height = self.board_size[1] // self.square_count
         self.config = self.generate_start_config(board_size)
-
-    # self.print_board()
 
     def generate_start_config(self, board_size):
         config = [[Square.EMPTY for _ in range(board_size.value)] for _ in range(board_size.value)]
         white_coords = []
         black_coords = []
+        if board_size == BoardSize.FourByFour:
+            white_coords = ['d2']
+            black_coords = ['a3']
         if board_size == BoardSize.SixBySix:
             white_coords = ['d1', 'c6']
             black_coords = ['a4', 'f3']
@@ -211,7 +239,7 @@ class Board:
             config[i][j] = Square.BLACK
         return config
 
-    # converts notation to index, takes as input eg. 'a1' and returns (0, 0), row are number and columns are letters
+    # converts notation to index, takes as input eg. 'a1' and returns (0, 0)
     def notation_to_index(self, coord):
         return (int(''.join(filter(str.isdigit, coord))) - 1), (ord(''.join(filter(str.isalpha, coord))) - ord('a'))
 
@@ -244,36 +272,31 @@ class Board:
         source_row, source_col = source
         dest_row, dest_col = destination
 
-        # source square has to be the one containing either black or white amazon
-        # AI algorithm doesn't rely on internal white_to_play variable, so there is option to turn it off
+        # source square has to be the one containing either black or white amazon (depending who is about to make a move)
+        # my AI algorithm doesn't keep track of internal white_to_play variable, so I made option to turn it off
         if not omit_player_checking:
             if (self.white_to_play and self.config[source_row][source_col] != Square.WHITE) or (
                     not self.white_to_play and self.config[source_row][source_col] != Square.BLACK):
-                #   print('Invalid move, there is no piece on this square', source_row, source_col)
                 return False
 
-        # move can only be straight line
+        # move can only be over the straight line
         delta_row = dest_row - source_row
         delta_col = dest_col - source_col
         max_abs_delta = max(abs(delta_row), abs(delta_col))
 
-        # tanges 45 = 1 = x / y, zeby diagolnie lezaly na tej samej prostej kat musi być miedzy nimi 45 stopni
+        # or diagonally
         if delta_row != 0 and delta_col != 0 and abs(delta_row / delta_col) != 1:
-            # print('Invalid move, targets are not on the straight line')
             return False
 
-        # for vertical and horizontal
+        # cannot move to the same square
         if delta_row == 0 and delta_col == 0:
-            #  print('Invalid move, cannot move to the same square')
             return False
 
-        # get all the indices on the line
-        # zmienic zeby nie uwzgledniac source i destination
+        # cannot cross or enter occupied square
         for i in range(1, max_abs_delta + 1):
             current_row = source_row + (i * delta_row) // max_abs_delta
             current_col = source_col + (i * delta_col) // max_abs_delta
             if self.config[current_row][current_col] in [Square.BLOCKED, Square.WHITE, Square.BLACK]:
-                # print('Invalid move, you cannot cross or enter occupied square')
                 return False
         return True
 
@@ -284,7 +307,7 @@ class Board:
     def shoot_arrow(self, dest):
         self.config[dest[0]][dest[1]] = Square.BLOCKED
 
-    # wyjasnienie algorytmu https://www.baeldung.com/cs/flood-fill-algorithm
+    # more info: https://www.baeldung.com/cs/flood-fill-algorithm
     def count_territory(self):
         def update_territory(territory):
             count = 0
@@ -336,20 +359,26 @@ class Board:
                     territory_map[row][col] = Territory.OCCUPIED
         if n_territory == 0:
             if w_territory > b_territory:
-                return w_territory, -1
+                return w_territory - b_territory, -1
             else:
-                return -1, b_territory
+                return -1, b_territory - w_territory
         else:
             return w_territory + n_territory, b_territory + n_territory
 
+    def update_config(self, other):
+        for i in range(len(self.config)):
+            for j in range(len(self.config)):
+                self.config[i][j] = other[i][j]
 
 class BoardAI(Board):
-    def __init__(self, board_size):
+    def __init__(self, board_size, config=None):
         super().__init__(board_size)
+        if config is not None:
+            self.config = config
 
     # queenlike moves apply to amazon and arrow moves
     # input: starting square
-    # output: possible ending squares
+    # output: list of possible ending squares
     def get_queenlike_moves(self, start):
         moves = []
         for i in range(len(self.config)):
@@ -359,8 +388,8 @@ class BoardAI(Board):
                     moves.append((start, target))
         return moves
 
-    # input: player - white or black
-    # output: (start, target, arrow) - all possible positions
+    # input: player (Player.white or Player.black)
+    # output: [(start, target, arrow)] - list of all possible positions
     def get_possible_moves(self, player):
         output = []
         if player == Player.WHITE:
@@ -389,7 +418,7 @@ class BoardAI(Board):
         board.shoot_arrow(move)
         return board
 
-    # takes the full in the form of (start, end, arrow) and returns new board after this move is applied
+    # takes the full move in the form of (start, end, arrow) and returns new board after this move is applied
     def get_new_state_for_full_move(self, move):
         board = copy.deepcopy(self)
         amazon_start, amazon_target, arrow = move
@@ -397,7 +426,7 @@ class BoardAI(Board):
         board.shoot_arrow(arrow)
         return board
 
-    # this is needed for comparing states
+    # this is needed for comparing states and saving data to file
     def __eq__(self, other):
         for i in range(len(self.config)):
             for j in range(len(self.config)):
@@ -411,108 +440,132 @@ class BoardAI(Board):
 
 from datetime import datetime, timedelta
 import random
+import pickle
 from math import log, sqrt
 
 
-class MonteCarloTreeSearch:
-    def __init__(self, seconds=30):
-        self.starting_board = BoardAI(BoardSize.SixBySix)
+from collections import defaultdict
+
+class MonteCarlo:
+    def __init__(self, file_path, seconds=30):
+        self.starting_board = BoardAI(BoardSize.FourByFour)
+        nodes_path = file_path + 'nodes.pkl'
+        wins_path = file_path + 'wins.pkl'
+        plays_path = file_path + 'plays.pkl'
 
         # Larger values of C will encourage more exploration of the possibilities,
         # and smaller values will cause the AI to prefer concentrating on known good moves
         self.C = 1.4
 
-        # idx 0 - wins
-        # idx 1 - plays
-        self.states = dict()
+        self.wins = defaultdict(int)
+        self.plays = defaultdict(int)
+        self.children = dict()
 
-        # true - white player, false - player black
-        # update the path during back propagation
-        self.path = {
-            Player.WHITE: [],
-            Player.BLACK: []
-        }
-        self.player = Player.WHITE
+        if os.path.isfile(nodes_path):
+            with open(nodes_path, 'rb') as f:
+                self.children = pickle.load(f)
+        if os.path.isfile(wins_path):
+            with open(wins_path, 'rb') as f:
+                self.wins = pickle.load(f)
+        if os.path.isfile(plays_path):
+            with open(plays_path, 'rb') as f:
+                self.plays = pickle.load(f)
+            print('Data read from file')
 
         self.calculation_time = timedelta(seconds=seconds)
-        begin = datetime.now()
+        save_timer = begin = datetime.now()
         while datetime.now() - begin < self.calculation_time:
-            self.path[Player.WHITE].clear()
-            self.path[Player.BLACK].clear()
-            self.simulate()
-        print('siema')
+            self.do_rollout((Player.WHITE, self.starting_board))
+            # after one minute of training save data to file
+            if datetime.now() - save_timer > timedelta(seconds=60):
+                print('Data serialized', datetime.now())
+                with open(nodes_path, 'wb') as f:
+                    pickle.dump(self.children, f)
+                with open(wins_path, 'wb') as f:
+                    pickle.dump(self.wins, f)
+                with open(plays_path, 'wb') as f:
+                    pickle.dump(self.plays, f)
+                save_timer = datetime.now()
 
-    # def select_and_expand(self, init_state, player):
-    #     max_score = None
-    #     best_state = None
-    #     moves = init_state.get_possible_moves(player)
-    #     random.shuffle(moves)
-    #     #print(len(self.path[player]))
-    #     for move in moves:
-    #         state = init_state.get_new_state_for_full_move(move)
-    #         # we found unexplored node, expand on it
-    #         if state not in self.states:
-    #             self.path[player].append(state)
-    #             self.states[state] = (0, 0)
-    #             return state, Player.other(player)
-    #         wins, plays = self.states[state]
-    #         if max_score is None or wins / plays > max_score:
-    #             max_score = (wins / plays) + (1.4 * sqrt(log(plays) / plays))
-    #             best_state = state
-    #     self.path[player].append(best_state)
-    #     # all the moves for one player are evaluated, search for the other one
-    #     return self.select_and_expand(best_state, Player.other(player))
+    #node is (player, state)
+    def do_rollout(self, node):
+        path = self.select(node)
+        leaf = path[-1]
+        self.expand(leaf)
+        reward = self.simulate(leaf)
+        self.backpropagate(path, reward)
 
-    def select_and_expand(self, init_state, player):
-        best_state = None
-        next_states = [
-            init_state.get_new_state_for_full_move(move)
-            for move in init_state.get_possible_moves(player)
-        ]
-        if all(self.states.get(state) for state in next_states):
-            log_total = log(sum(self.states[state][1] for state in next_states))
-            value, best_state = max(
-                ((self.states[state][0] / self.states[state][1]) +
-                 self.C * sqrt(log_total / self.states[state][1]),
-                 state)
-                for state in next_states
+    def choose(self, node):
+        moves = node.get_possible_moves()
+        if len(moves) == 0:
+            raise RuntimeError(f"choose called on terminal node {node}")
+        if node not in self.children:
+            return random.choice([node.get_new_state_for_full_move() for move in moves])
+        def score(n):
+            if self.plays[n] == 0:
+                return float("-inf")
+            return self.wins[n] / self.plays[n]
+        return max(self.children[node], key=score)
+
+    def _uct_select(self, node):
+        def uct(n):
+            return self.wins[n] / self.plays[n] + self.C * sqrt(
+                log(self.plays[node]) / self.plays[n]
             )
-        else:
-            best_state = random.choice(next_states)
-            # we found unexplored node, expand on it
-            if best_state not in self.states:
-                self.path[player].append(best_state)
-                self.states[best_state] = (0, 0)
-                return best_state, Player.other(player)
-        self.path[player].append(best_state)
-        return self.select_and_expand(best_state, Player.other(player))
+        return max(self.children[node], key=uct)
 
-    def backpropagation(self, player, winner):
-        for state in self.path[player]:
-            if state in self.states:
-                wins, plays = self.states[state]
-                if winner:
-                    wins += 1
-                plays += 1
-                self.states[state] = (wins, plays)
-
-    def simulate(self):
-        state, self.player = self.select_and_expand(self.starting_board, self.player)
-        # play one game until the end
+    def select(self, node):
+        path = []
         while True:
-            moves = state.get_possible_moves(self.player)
-            if not moves:
-                break
-            state = state.get_new_state_for_full_move(random.choice(moves))
-            self.path[self.player].append(state)
-            self.player = Player.other(self.player)
-        self.backpropagation(Player.other(self.player), True)
-        self.backpropagation(self.player, False)
+            path.append(node)
+            if node not in self.children or not self.children[node]:
+                return path
+            unexplored = [child for child in self.children[node] if child not in self.children]
+            if unexplored:
+                player, state = random.choice(unexplored)
+                path.append((player, state))
+                return path
+            node = self._uct_select(node)
+
+    def simulate(self, node):
+        while True:
+            player, state = node
+            moves = state.get_possible_moves(player)
+            if len(moves) == 0:
+                reward = 1
+                return reward
+            node = random.choice([(Player.other(player), state.get_new_state_for_full_move(move)) for move in moves])
+
+    def expand(self, node):
+        player, state = node
+        if node in self.children:
+            return # already expanded
+        self.children[node] = [(Player.other(player), state.get_new_state_for_full_move(move)) for move in state.get_possible_moves(player)]
+
+    def backpropagate(self, path, reward):
+        for node in reversed(path):
+            self.plays[node] += 1
+            self.wins[node] += reward
+            reward = 1 - reward
+
+bot = MonteCarlo('TEST_', seconds=0)
+
+import pygame
+
+def bot_decide(board, player):
+    global bot
+    boardAI = BoardAI(BoardSize.FourByFour, copy.deepcopy(board.config))
+    moves = boardAI.get_possible_moves(player)
+    if (player, boardAI) not in bot.children:
+        return random.choice([boardAI.get_new_state_for_full_move(move) for move in boardAI.get_possible_moves(player)])
+    def score(n):
+        if bot.plays[n] == 0:
+            return float("-inf")
+        return bot.wins[n] / bot.plays[n]
+
+    return max(bot.children[(player, boardAI)], key=score)[1]
 
 
 if __name__ == '__main__':
-    print(Square.WHITE == Player.WHITE)
-    MonteCarloTreeSearch(seconds=155)
-    # Game(BoardSize.SixBySix, human=True).run()
+    Game(BoardSize.FourByFour, human=True).run()
 
-# Cel na rano: zapis do pliku
