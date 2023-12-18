@@ -120,7 +120,8 @@ class Game:
     def update(self):
         # for now, human will play as white and bot as black
         if self.board.white_to_play:
-            new_board = bot_decide(self.board, Player.WHITE)
+            #new_board = monte_carlo_decide(self.board, Player.WHITE)
+            new_board = alpha_beta_decide(self.board, 3, Player.WHITE)
             self.board.update_config(new_board.config)
             self.board.white_to_play = False
         else:
@@ -132,7 +133,6 @@ class Game:
         if b_terr == -1:
             print('White won!')
             self.running = False
-       # print('Territory (White, Black):', self.board.count_territory())
 
     def move_piece_human(self):
         if self.mouse_button_clicked:
@@ -548,12 +548,46 @@ class MonteCarlo:
             self.wins[node] += reward
             reward = 1 - reward
 
+def alpha_beta_search(board, depth, player, alpha, beta):
+    w_terr, b_terr = board.count_territory()
+    b_terr = -b_terr # evaluate black territory as negative
+    if depth == 0 or w_terr == -1 or b_terr == 1:
+        return w_terr if player == Player.WHITE else b_terr, None
+    min_eval = float("inf")
+    max_eval = float("-inf")
+    best_move = None
+    if player == Player.WHITE:
+        for move in board.get_possible_moves(player):
+            new_board = board.get_new_state_for_full_move(move)
+            eval, _ = alpha_beta_search(new_board, depth - 1, Player.BLACK, alpha, beta)
+            if eval > max_eval:
+                max_eval = eval
+                best_move = move
+            alpha = max(alpha, max_eval)
+            if beta <= alpha:
+                break
+    else:
+        for move in board.get_possible_moves(player):
+            new_board = board.get_new_state_for_full_move(move)
+            eval, _ = alpha_beta_search(new_board, depth - 1, Player.WHITE, alpha, beta)
+            if eval < min_eval:
+                min_eval = eval
+                best_move = move
+            beta = min(beta, min_eval)
+            if beta <= alpha:
+                break
+    return max_eval if player == Player.WHITE else min_eval, best_move
+
+def alpha_beta_decide(board, depth, player):
+    boardAI = BoardAI(BoardSize.FourByFour, copy.deepcopy(board.config))
+    _, best_move = alpha_beta_search(boardAI, depth, player, float("-inf"), float("inf"))
+    return boardAI.get_new_state_for_full_move(best_move)
+
 bot = MonteCarlo('TEST_', seconds=0)
 
 import pygame
 
-def bot_decide(board, player):
-    global bot
+def monte_carlo_decide(board, player):
     boardAI = BoardAI(BoardSize.FourByFour, copy.deepcopy(board.config))
     moves = boardAI.get_possible_moves(player)
     if (player, boardAI) not in bot.children:
@@ -568,4 +602,3 @@ def bot_decide(board, player):
 
 if __name__ == '__main__':
     Game(BoardSize.FourByFour, human=True).run()
-
