@@ -119,20 +119,37 @@ class Game:
 
     def update(self):
         # for now, human will play as white and bot as black
+        self.first_move = True
         if self.board.white_to_play:
             #new_board = monte_carlo_decide(self.board, Player.WHITE)
-            new_board = alpha_beta_decide(self.board, 3, Player.WHITE)
+            new_board = None
+            if self.first_move:
+                boardAI = BoardAI(BoardSize.FourByFour, copy.deepcopy(self.board.config))
+                new_board = random.choice([(boardAI.get_new_state_for_full_move(move)) for move in boardAI.get_possible_moves(Player.WHITE)])
+            else:
+               # new_board = alpha_beta_decide(self.board, 2, Player.WHITE)
+                new_board = monte_carlo_decide(self.board, Player.WHITE)
             self.board.update_config(new_board.config)
             self.board.white_to_play = False
         else:
-            self.move_piece_human()
+            if self.first_move:
+                boardAI = BoardAI(BoardSize.FourByFour, copy.deepcopy(self.board.config))
+                new_board = random.choice(
+                    [(boardAI.get_new_state_for_full_move(move)) for move in boardAI.get_possible_moves(Player.BLACK)])
+            else:
+                new_board = alpha_beta_decide(self.board, 2, Player.BLACK)
+            self.board.update_config(new_board.config)
+            self.board.white_to_play = True
+            #self.move_piece_human()
         w_terr, b_terr = self.board.count_territory()
         if w_terr == -1:
             print('Black won!')
             self.running = False
+            self.first_move = False
         if b_terr == -1:
             print('White won!')
             self.running = False
+            self.first_move = False
 
     def move_piece_human(self):
         if self.mouse_button_clicked:
@@ -528,13 +545,17 @@ class MonteCarlo:
             node = self._uct_select(node)
 
     def simulate(self, node):
+        player_leaf, _ = node
         while True:
             player, state = node
             moves = state.get_possible_moves(player)
-            if len(moves) == 0:
-                reward = 1
-                return reward
-            node = random.choice([(Player.other(player), state.get_new_state_for_full_move(move)) for move in moves])
+            w_terr, b_terr = state.count_territory()
+            if w_terr == -1 or b_terr == -1:
+                return 0 if player_leaf == player else 1
+            #for random games
+            #node = random.choice([(Player.other(player), state.get_new_state_for_full_move(move)) for move in moves])
+            # for alpha training
+            node = (Player.other(player), alpha_beta_decide(state, 2, player))
 
     def expand(self, node):
         player, state = node
@@ -583,11 +604,25 @@ def alpha_beta_decide(board, depth, player):
     _, best_move = alpha_beta_search(boardAI, depth, player, float("-inf"), float("inf"))
     return boardAI.get_new_state_for_full_move(best_move)
 
-bot = MonteCarlo('TEST_', seconds=0)
+#bot2 = MonteCarlo('TEST_ALPHA1_1h', seconds=0)
+bot = MonteCarlo('TEST_ALPHA2_1h', seconds=0)
 
-import pygame
+#import pygame
 
-def monte_carlo_decide(board, player):
+def monte_carlo_decide(bot, board, player):
+    boardAI = BoardAI(BoardSize.FourByFour, copy.deepcopy(board.config))
+    moves = boardAI.get_possible_moves(player)
+    if (player, boardAI) not in bot.children:
+        #return random.choice([boardAI.get_new_state_for_full_move(move) for move in boardAI.get_possible_moves(player)])
+        return alpha_beta_decide(board, 2, player)
+    def score(n):
+        if bot.plays[n] == 0:
+            return float("-inf")
+        return bot.wins[n] / bot.plays[n]
+
+    return max(bot.children[(player, boardAI)], key=score)[1]
+
+def monte_carlo_decide2(bot, board, player):
     boardAI = BoardAI(BoardSize.FourByFour, copy.deepcopy(board.config))
     moves = boardAI.get_possible_moves(player)
     if (player, boardAI) not in bot.children:
@@ -600,5 +635,50 @@ def monte_carlo_decide(board, player):
     return max(bot.children[(player, boardAI)], key=score)[1]
 
 
+def play_match():
+    game_to_play = 100
+    black_score = 0
+    white_score = 0
+    print("Starting match...")
+    while (black_score + white_score) != game_to_play:
+        board = BoardAI(BoardSize.FourByFour)
+        game_over = False
+        first_move = True
+        while not game_over:
+            if board.white_to_play:
+                # new_board = monte_carlo_decide(self.board, Player.WHITE)
+                new_board = None
+                if first_move:
+                    new_board = random.choice([(board.get_new_state_for_full_move(move)) for move in board.get_possible_moves(Player.WHITE)])
+                else:
+                   # new_board = alpha_beta_decide(board, 2, Player.WHITE)
+                    new_board = monte_carlo_decide(bot, board, Player.WHITE)
+                board.update_config(new_board.config)
+                board.white_to_play = False
+                first_move = False
+            else:
+                # new_board = monte_carlo_decide(self.board, Player.WHITE)
+                if first_move:
+                    new_board = random.choice(
+                        [(board.get_new_state_for_full_move(move)) for move in board.get_possible_moves(Player.BLACK)])
+                else:
+                   #new_board = alpha_beta_decide(board, 2, Player.BLACK)
+                   new_board = monte_carlo_decide2(bot, board, Player.BLACK)
+                board.update_config(new_board.config)
+                board.white_to_play = True
+            w_terr, b_terr = board.count_territory()
+            if w_terr == -1:
+               # print('Black won!')
+                game_over = True
+                black_score += 1
+            if b_terr == -1:
+              #  print('White won!')
+                game_over = True
+                white_score += 1
+    print("White scored: ", white_score, "Black scored: ", black_score)
+
+
 if __name__ == '__main__':
-    Game(BoardSize.FourByFour, human=True).run()
+   #pass
+   # Game(BoardSize.FourByFour, human=True).run()
+    play_match()
